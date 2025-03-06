@@ -1,0 +1,21 @@
+[package]
+name = "kimiha"
+version = "0.1.0"
+edition = "2024"
+authors = ["Didy <9417799+didy-kpn@users.noreply.github.com>"]
+description = "A high-performance, low-latency event-driven orchestration framework for building scalable trading systems"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1.43.0", features = ["full"] }
+async-trait = "0.1.85"
+thiserror = "2.0.11"
+uuid = { version = "1.7.0", features = ["v4"] }
+
+# [dev-dependencies]
+# tokio = { version = "1.43.0", features = ["full", "rt-multi-thread", "macros"] }
+# criterion = { version = "0.5", features = ["html_reports"] }
+
+# [[bench]]
+# name = "scheduler"
+# harness = false
