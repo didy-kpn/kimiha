@@ -4,6 +4,7 @@ use tokio::sync::broadcast;
 
 use crate::{channel_config::ChannelConfig, error::OrchestratorError, types::EventType};
 
+#[derive(Clone)]
 pub struct EventBus<E> {
     channels: HashMap<E, broadcast::Sender<String>>,
     configs: Vec<(E, ChannelConfig)>,

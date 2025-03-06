@@ -1,6 +1,7 @@
 #[derive(Debug, Clone)]
 pub struct ChannelConfig {
     capacity: usize,
+    #[allow(dead_code)]
     description: String,
 }
 
