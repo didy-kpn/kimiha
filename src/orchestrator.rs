@@ -117,16 +117,19 @@ impl<E: EventType + 'static + ToString> TradingOrchestrator<E> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use async_trait::async_trait;
-    use tokio::sync::Mutex;
+    use super::*;
     use crate::{
         channel_config::ChannelConfig,
         error::OrchestratorError,
         event_bus::EventBus,
-        types::{Aggregator, BackgroundTask, Connector, EventTask, EventType, Executable, Executor, Strategy},
+        types::{
+            Aggregator, BackgroundTask, Connector, EventTask, EventType, Executable, Executor,
+            Strategy,
+        },
     };
-    use super::*;
+    use async_trait::async_trait;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     #[derive(Debug, Clone, Hash, PartialEq, Eq)]
     enum TestEvent {
@@ -137,12 +140,12 @@ mod tests {
 
     impl EventType for TestEvent {}
 
-    impl ToString for TestEvent {
-        fn to_string(&self) -> String {
+    impl std::fmt::Display for TestEvent {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
-                TestEvent::MarketData => "MarketData".to_string(),
-                TestEvent::TradeSignal => "TradeSignal".to_string(),
-                TestEvent::Execution => "Execution".to_string(),
+                TestEvent::MarketData => write!(f, "MarketData"),
+                TestEvent::TradeSignal => write!(f, "TradeSignal"),
+                TestEvent::Execution => write!(f, "Execution"),
             }
         }
     }
@@ -349,9 +352,18 @@ mod tests {
 
     fn create_test_event_bus() -> EventBus<TestEvent> {
         let configs = vec![
-            (TestEvent::MarketData, ChannelConfig::new(10, "Market Data Channel".to_string())),
-            (TestEvent::TradeSignal, ChannelConfig::new(10, "Trade Signal Channel".to_string())),
-            (TestEvent::Execution, ChannelConfig::new(10, "Execution Channel".to_string())),
+            (
+                TestEvent::MarketData,
+                ChannelConfig::new(10, "Market Data Channel".to_string()),
+            ),
+            (
+                TestEvent::TradeSignal,
+                ChannelConfig::new(10, "Trade Signal Channel".to_string()),
+            ),
+            (
+                TestEvent::Execution,
+                ChannelConfig::new(10, "Execution Channel".to_string()),
+            ),
         ];
         EventBus::new(configs)
     }
@@ -359,13 +371,13 @@ mod tests {
     #[tokio::test]
     async fn test_trading_orchestrator_builder() {
         let event_bus = create_test_event_bus();
-        
+
         // Create the components
         let connector = Arc::new(Mutex::new(MockConnector::new("Connector 1")));
         let aggregator = Arc::new(Mutex::new(MockAggregator::new("Aggregator")));
         let strategy = Arc::new(Mutex::new(MockStrategy::new("Strategy 1")));
         let executor = Arc::new(Mutex::new(MockExecutor::new("Executor 1")));
-        
+
         // Build the orchestrator
         let orchestrator = TradingOrchestratorBuilder::new(event_bus)
             .with_connector(connector.clone())
@@ -374,67 +386,67 @@ mod tests {
             .with_executor(executor.clone())
             .build()
             .expect("Failed to build orchestrator");
-        
+
         // Verify the orchestrator was built correctly
         assert_eq!(orchestrator.connectors.len(), 1);
         assert_eq!(orchestrator.strategies.len(), 1);
         assert_eq!(orchestrator.executors.len(), 1);
         assert_eq!(orchestrator.event_bus().channel_count(), 3);
     }
-    
+
     #[tokio::test]
     async fn test_orchestrator_missing_components() {
         let event_bus = create_test_event_bus();
-        
+
         // Test missing connector
         let result = TradingOrchestratorBuilder::new(event_bus.clone())
             .with_aggregator(Arc::new(Mutex::new(MockAggregator::new("Aggregator"))))
             .with_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))))
             .with_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))))
             .build();
-        
+
         assert!(result.is_err());
         if let Err(OrchestratorError::MissingComponent(component)) = result {
             assert!(component.contains("connector"));
         } else {
             panic!("Expected MissingComponent error for connector");
         }
-        
+
         // Test missing aggregator
         let result = TradingOrchestratorBuilder::new(event_bus.clone())
             .with_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))))
             .with_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))))
             .with_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))))
             .build();
-        
+
         assert!(result.is_err());
         if let Err(OrchestratorError::MissingComponent(component)) = result {
             assert_eq!(component, "aggregator");
         } else {
             panic!("Expected MissingComponent error for aggregator");
         }
-        
+
         // Test missing strategy
         let result = TradingOrchestratorBuilder::new(event_bus.clone())
             .with_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))))
             .with_aggregator(Arc::new(Mutex::new(MockAggregator::new("Aggregator"))))
             .with_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))))
             .build();
-        
+
         assert!(result.is_err());
         if let Err(OrchestratorError::MissingComponent(component)) = result {
             assert!(component.contains("strategy"));
         } else {
             panic!("Expected MissingComponent error for strategy");
         }
-        
+
         // Test missing executor
         let result = TradingOrchestratorBuilder::new(event_bus.clone())
             .with_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))))
             .with_aggregator(Arc::new(Mutex::new(MockAggregator::new("Aggregator"))))
             .with_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))))
             .build();
-        
+
         assert!(result.is_err());
         if let Err(OrchestratorError::MissingComponent(component)) = result {
             assert!(component.contains("executor"));
@@ -442,17 +454,17 @@ mod tests {
             panic!("Expected MissingComponent error for executor");
         }
     }
-    
+
     #[tokio::test]
     async fn test_orchestrator_start_shutdown() {
         let event_bus = create_test_event_bus();
-        
+
         // Create the components
         let connector = Arc::new(Mutex::new(MockConnector::new("Connector 1")));
         let aggregator = Arc::new(Mutex::new(MockAggregator::new("Aggregator")));
         let strategy = Arc::new(Mutex::new(MockStrategy::new("Strategy 1")));
         let executor = Arc::new(Mutex::new(MockExecutor::new("Executor 1")));
-        
+
         // Build the orchestrator
         let mut orchestrator = TradingOrchestratorBuilder::new(event_bus)
             .with_connector(connector.clone())
@@ -461,49 +473,61 @@ mod tests {
             .with_executor(executor.clone())
             .build()
             .expect("Failed to build orchestrator");
-        
+
         // Start the orchestrator
-        orchestrator.start().await.expect("Failed to start orchestrator");
-        
+        orchestrator
+            .start()
+            .await
+            .expect("Failed to start orchestrator");
+
         // Give some time for tasks to initialize
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        
+
         // Verify components were initialized
         assert!(connector.lock().await.initialized);
         assert!(aggregator.lock().await.initialized);
         assert!(strategy.lock().await.initialized);
         assert!(executor.lock().await.initialized);
-        
+
         // Publish some events
-        let market_data_sender = orchestrator.event_bus().clone_sender(&TestEvent::MarketData).unwrap();
+        let market_data_sender = orchestrator
+            .event_bus()
+            .clone_sender(&TestEvent::MarketData)
+            .unwrap();
         let _ = market_data_sender.send("market_data_event".to_string());
-        
-        let trade_signal_sender = orchestrator.event_bus().clone_sender(&TestEvent::TradeSignal).unwrap();
+
+        let trade_signal_sender = orchestrator
+            .event_bus()
+            .clone_sender(&TestEvent::TradeSignal)
+            .unwrap();
         let _ = trade_signal_sender.send("trade_signal_event".to_string());
-        
+
         // Give some time for events to be processed
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        
+
         // Shutdown the orchestrator
-        orchestrator.shutdown().await.expect("Failed to shutdown orchestrator");
-        
+        orchestrator
+            .shutdown()
+            .await
+            .expect("Failed to shutdown orchestrator");
+
         // Verify components were shutdown
         assert!(connector.lock().await.shutdown);
         assert!(aggregator.lock().await.shutdown);
         assert!(strategy.lock().await.shutdown);
         assert!(executor.lock().await.shutdown);
-        
+
         // Verify background tasks were executed
         assert!(connector.lock().await.executed);
         assert!(aggregator.lock().await.executed);
-        
+
         // Verify events were handled
         let strategy_lock = strategy.lock().await;
         assert!(strategy_lock.handled_event.is_some());
         if let Some(event_data) = &strategy_lock.handled_event {
             assert_eq!(event_data, "market_data_event");
         }
-        
+
         let executor_lock = executor.lock().await;
         assert!(executor_lock.handled_event.is_some());
         if let Some(event_data) = &executor_lock.handled_event {
