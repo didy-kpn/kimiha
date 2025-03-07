@@ -1,3 +1,4 @@
+pub mod aggregator;
 pub mod channel_config;
 pub mod error;
 pub mod event_bus;

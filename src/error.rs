@@ -18,4 +18,10 @@ pub enum OrchestratorError {
     TaskNotFound(TaskId),
     #[error("Missing required component: {0}")]
     MissingComponent(&'static str),
+    #[error("Component not initialized: {0}")]
+    NotInitialized(&'static str),
+    #[error("Invalid configuration: {0}")]
+    InvalidConfiguration(String),
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
 }
