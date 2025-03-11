@@ -152,11 +152,11 @@ impl<E: EventType + 'static + ToString> BackgroundTask for Aggregator<E> {
 
         Ok(())
     }
-    
+}
+
+#[async_trait]
+impl<E: EventType + 'static + ToString> AggregatorTrait for Aggregator<E> {
     fn market_data_sender(&self) -> mpsc::Sender<MarketData> {
         self.connector_tx.clone()
     }
 }
-
-#[async_trait]
-impl<E: EventType + 'static + ToString> AggregatorTrait for Aggregator<E> {}
