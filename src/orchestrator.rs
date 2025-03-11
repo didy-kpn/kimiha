@@ -111,7 +111,7 @@ impl<E: EventType + 'static + ToString + Clone> TradingOrchestratorBuilder<E> {
         );
         
         // Get the input stream from the aggregator that connectors can use
-        let _aggregator_input = aggregator.get_input_stream();
+        let _aggregator_input = aggregator.market_data_sender();
         // Note: In a real implementation, you would pass this to connectors
         // or store it somewhere accessible to them
 

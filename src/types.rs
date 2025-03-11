@@ -20,8 +20,8 @@ pub trait Executable: Send + Sync {
 pub trait BackgroundTask: Executable {
     async fn execute(&mut self) -> Result<(), OrchestratorError>;
     
-    fn get_input_stream(&self) -> mpsc::Sender<MarketData> {
-        unimplemented!("get_input_stream not implemented for this BackgroundTask")
+    fn market_data_sender(&self) -> mpsc::Sender<MarketData> {
+        unimplemented!("market_data_sender not implemented for this BackgroundTask")
     }
 }
 

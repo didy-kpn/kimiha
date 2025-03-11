@@ -153,7 +153,7 @@ impl<E: EventType + 'static + ToString> BackgroundTask for Aggregator<E> {
         Ok(())
     }
     
-    fn get_input_stream(&self) -> mpsc::Sender<MarketData> {
+    fn market_data_sender(&self) -> mpsc::Sender<MarketData> {
         self.connector_tx.clone()
     }
 }
