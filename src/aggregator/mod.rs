@@ -54,11 +54,6 @@ impl<E: EventType + 'static + ToString> Aggregator<E> {
         }
     }
 
-    // Get a sender that can be passed to Connectors to send data to this Aggregator
-    pub fn get_sender(&self) -> mpsc::Sender<MarketData> {
-        self.connector_tx.clone()
-    }
-
     // Process a market data update
     async fn process_market_data(
         &mut self,
@@ -156,6 +151,10 @@ impl<E: EventType + 'static + ToString> BackgroundTask for Aggregator<E> {
         }
 
         Ok(())
+    }
+    
+    fn get_input_stream(&self) -> mpsc::Sender<MarketData> {
+        self.connector_tx.clone()
     }
 }
 

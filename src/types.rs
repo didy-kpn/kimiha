@@ -1,7 +1,9 @@
 use std::hash::Hash;
 
 use async_trait::async_trait;
+use tokio::sync::mpsc;
 
+use crate::aggregator::models::MarketData;
 use crate::error::OrchestratorError;
 
 pub trait EventType: Send + Sync + Clone + Hash + Eq {}
@@ -17,6 +19,10 @@ pub trait Executable: Send + Sync {
 #[async_trait]
 pub trait BackgroundTask: Executable {
     async fn execute(&mut self) -> Result<(), OrchestratorError>;
+    
+    fn get_input_stream(&self) -> mpsc::Sender<MarketData> {
+        unimplemented!("get_input_stream not implemented for this BackgroundTask")
+    }
 }
 
 #[async_trait]

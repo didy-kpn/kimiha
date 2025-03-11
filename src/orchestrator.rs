@@ -109,6 +109,11 @@ impl<E: EventType + 'static + ToString + Clone> TradingOrchestratorBuilder<E> {
             self.event_bus.clone(),
             market_event.clone(),
         );
+        
+        // Get the input stream from the aggregator that connectors can use
+        let _aggregator_input = aggregator.get_input_stream();
+        // Note: In a real implementation, you would pass this to connectors
+        // or store it somewhere accessible to them
 
         // Register the aggregator with the scheduler
         let aggregator_arc: Arc<Mutex<dyn BackgroundTask>> = Arc::new(Mutex::new(aggregator));
