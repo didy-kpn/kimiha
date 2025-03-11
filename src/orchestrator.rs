@@ -8,7 +8,7 @@ use crate::{
     event_bus::EventBus,
     scheduler::Scheduler,
     task_id::TaskId,
-    types::{BackgroundTask, Connector, EventTask, EventType, Executor, Strategy},
+    types::{Aggregator as AggregatorTrait, BackgroundTask, Connector, EventTask, EventType, Executor, Strategy},
 };
 
 pub struct TradingOrchestratorBuilder<E> {
