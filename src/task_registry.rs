@@ -7,18 +7,18 @@ use crate::{
     types::{BackgroundTask, EventTask, EventType},
 };
 
-pub struct TaskRegistry<E> {
+pub struct TaskRegistry<E, M> {
     background_tasks: HashMap<TaskId, Arc<Mutex<dyn BackgroundTask>>>,
-    event_tasks: HashMap<TaskId, Arc<Mutex<dyn EventTask<E>>>>,
+    event_tasks: HashMap<TaskId, Arc<Mutex<dyn EventTask<E, M>>>>,
 }
 
-impl<E: EventType + 'static + ToString> Default for TaskRegistry<E> {
+impl<E: EventType + 'static + ToString, M: Clone + Send + 'static> Default for TaskRegistry<E, M> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<E: EventType + 'static + ToString> TaskRegistry<E> {
+impl<E: EventType + 'static + ToString, M: Clone + Send + 'static> TaskRegistry<E, M> {
     pub fn new() -> Self {
         Self {
             background_tasks: HashMap::new(),
@@ -32,7 +32,7 @@ impl<E: EventType + 'static + ToString> TaskRegistry<E> {
         id
     }
 
-    pub fn register_event_task(&mut self, task: Arc<Mutex<dyn EventTask<E>>>) -> TaskId {
+    pub fn register_event_task(&mut self, task: Arc<Mutex<dyn EventTask<E, M>>>) -> TaskId {
         let id = TaskId::new();
         self.event_tasks.insert(id.clone(), task);
         id
@@ -42,7 +42,7 @@ impl<E: EventType + 'static + ToString> TaskRegistry<E> {
         self.background_tasks.get(id).cloned()
     }
 
-    pub fn get_event_task(&self, id: &TaskId) -> Option<Arc<Mutex<dyn EventTask<E>>>> {
+    pub fn get_event_task(&self, id: &TaskId) -> Option<Arc<Mutex<dyn EventTask<E, M>>>> {
         self.event_tasks.get(id).cloned()
     }
 }

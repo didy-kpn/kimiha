@@ -11,17 +11,17 @@ use crate::{
     types::{Aggregator as AggregatorTrait, BackgroundTask, Connector, EventTask, EventType, Executor, Strategy},
 };
 
-pub struct TradingOrchestratorBuilder<E> {
+pub struct TradingOrchestratorBuilder<E, M> {
     connectors: Vec<TaskId>,
     strategies: Vec<TaskId>,
     executors: Vec<TaskId>,
-    event_bus: EventBus<E>,
+    event_bus: EventBus<E, M>,
     market_event: Option<E>,
-    scheduler: Option<Scheduler<E>>,
+    scheduler: Option<Scheduler<E, M>>,
 }
 
-impl<E: EventType + 'static + ToString + Clone> TradingOrchestratorBuilder<E> {
-    pub fn new(event_bus: EventBus<E>) -> Self {
+impl<E: EventType + 'static + ToString + Clone, M: Clone + Send + 'static + From<String>> TradingOrchestratorBuilder<E, M> {
+    pub fn new(event_bus: EventBus<E, M>) -> Self {
         Self {
             connectors: Vec::new(),
             strategies: Vec::new(),
@@ -45,27 +45,27 @@ impl<E: EventType + 'static + ToString + Clone> TradingOrchestratorBuilder<E> {
         self
     }
 
-    pub fn with_strategy<T: Strategy<E> + 'static>(mut self, strategy: Arc<Mutex<T>>) -> Self {
+    pub fn with_strategy<T: Strategy<E, M> + 'static>(mut self, strategy: Arc<Mutex<T>>) -> Self {
         // Create the scheduler if it doesn't exist yet
         if self.scheduler.is_none() {
             self.scheduler = Some(Scheduler::new(self.event_bus.clone()));
         }
 
         let scheduler = self.scheduler.as_mut().unwrap();
-        let event_task: Arc<Mutex<dyn EventTask<E>>> = strategy;
+        let event_task: Arc<Mutex<dyn EventTask<E, M>>> = strategy;
         let id = scheduler.register_event_task(event_task);
         self.strategies.push(id);
         self
     }
 
-    pub fn with_executor<T: Executor<E> + 'static>(mut self, executor: Arc<Mutex<T>>) -> Self {
+    pub fn with_executor<T: Executor<E, M> + 'static>(mut self, executor: Arc<Mutex<T>>) -> Self {
         // Create the scheduler if it doesn't exist yet
         if self.scheduler.is_none() {
             self.scheduler = Some(Scheduler::new(self.event_bus.clone()));
         }
 
         let scheduler = self.scheduler.as_mut().unwrap();
-        let event_task: Arc<Mutex<dyn EventTask<E>>> = executor;
+        let event_task: Arc<Mutex<dyn EventTask<E, M>>> = executor;
         let id = scheduler.register_event_task(event_task);
         self.executors.push(id);
         self
@@ -76,7 +76,7 @@ impl<E: EventType + 'static + ToString + Clone> TradingOrchestratorBuilder<E> {
         self
     }
 
-    pub fn build(mut self) -> Result<TradingOrchestrator<E>, OrchestratorError> {
+    pub fn build(mut self) -> Result<TradingOrchestrator<E, M>, OrchestratorError> {
         if self.connectors.is_empty() {
             return Err(OrchestratorError::MissingComponent(
                 "at least one connector is required",
@@ -133,7 +133,7 @@ impl<E: EventType + 'static + ToString + Clone> TradingOrchestratorBuilder<E> {
     }
 }
 
-pub struct TradingOrchestrator<E> {
+pub struct TradingOrchestrator<E, M> {
     #[allow(dead_code)]
     connectors: Vec<TaskId>,
     #[allow(dead_code)]
@@ -142,10 +142,10 @@ pub struct TradingOrchestrator<E> {
     strategies: Vec<TaskId>,
     #[allow(dead_code)]
     executors: Vec<TaskId>,
-    scheduler: Scheduler<E>,
+    scheduler: Scheduler<E, M>,
 }
 
-impl<E: EventType + 'static + ToString> TradingOrchestrator<E> {
+impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> TradingOrchestrator<E, M> {
     pub async fn start(&mut self) -> Result<(), OrchestratorError> {
         self.scheduler.start().await?;
         Ok(())
@@ -156,7 +156,7 @@ impl<E: EventType + 'static + ToString> TradingOrchestrator<E> {
         Ok(())
     }
 
-    pub fn event_bus(&self) -> &EventBus<E> {
+    pub fn event_bus(&self) -> &EventBus<E, M> {
         self.scheduler.event_bus()
     }
 }
@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl EventTask<TestEvent> for MockStrategy {
+    impl EventTask<TestEvent, String> for MockStrategy {
         fn subscribed_event(&self) -> &TestEvent {
             &self.event
         }
@@ -293,7 +293,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl Strategy<TestEvent> for MockStrategy {}
+    impl Strategy<TestEvent, String> for MockStrategy {}
 
     // Mock executor implementation
     struct MockExecutor {
@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl EventTask<TestEvent> for MockExecutor {
+    impl EventTask<TestEvent, String> for MockExecutor {
         fn subscribed_event(&self) -> &TestEvent {
             &self.event
         }
@@ -346,9 +346,9 @@ mod tests {
     }
 
     #[async_trait]
-    impl Executor<TestEvent> for MockExecutor {}
+    impl Executor<TestEvent, String> for MockExecutor {}
 
-    fn create_test_event_bus() -> EventBus<TestEvent> {
+    fn create_test_event_bus() -> EventBus<TestEvent, String> {
         let configs = vec![
             (
                 TestEvent::MarketData,

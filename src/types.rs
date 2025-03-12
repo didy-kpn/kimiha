@@ -22,9 +22,9 @@ pub trait BackgroundTask: Executable {
 }
 
 #[async_trait]
-pub trait EventTask<E: EventType + 'static>: Executable {
+pub trait EventTask<E: EventType + 'static, M: Clone + Send + 'static>: Executable {
     fn subscribed_event(&self) -> &E;
-    async fn handle_event(&mut self, event: String) -> Result<(), OrchestratorError>;
+    async fn handle_event(&mut self, event: M) -> Result<(), OrchestratorError>;
 }
 
 #[async_trait]
@@ -36,7 +36,7 @@ pub trait Aggregator: BackgroundTask {
 }
 
 #[async_trait]
-pub trait Strategy<E: EventType + 'static>: EventTask<E> {}
+pub trait Strategy<E: EventType + 'static, M: Clone + Send + 'static>: EventTask<E, M> {}
 
 #[async_trait]
-pub trait Executor<E: EventType + 'static>: EventTask<E> {}
+pub trait Executor<E: EventType + 'static, M: Clone + Send + 'static>: EventTask<E, M> {}

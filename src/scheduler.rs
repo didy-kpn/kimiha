@@ -10,15 +10,15 @@ use crate::{
     types::{BackgroundTask, EventTask, EventType},
 };
 
-pub struct Scheduler<E> {
-    task_registry: TaskRegistry<E>,
+pub struct Scheduler<E, M> {
+    task_registry: TaskRegistry<E, M>,
     background_task_ids: Vec<TaskId>,
     event_task_ids: Vec<TaskId>,
-    event_bus: EventBus<E>,
+    event_bus: EventBus<E, M>,
 }
 
-impl<E: EventType + 'static + ToString> Scheduler<E> {
-    pub fn new(event_bus: EventBus<E>) -> Self {
+impl<E: EventType + 'static + ToString, M: Clone + Send + 'static> Scheduler<E, M> {
+    pub fn new(event_bus: EventBus<E, M>) -> Self {
         Self {
             task_registry: TaskRegistry::new(),
             background_task_ids: Vec::new(),
@@ -27,7 +27,7 @@ impl<E: EventType + 'static + ToString> Scheduler<E> {
         }
     }
 
-    pub fn event_bus(&self) -> &EventBus<E> {
+    pub fn event_bus(&self) -> &EventBus<E, M> {
         &self.event_bus
     }
 
@@ -37,7 +37,7 @@ impl<E: EventType + 'static + ToString> Scheduler<E> {
         id
     }
 
-    pub fn register_event_task(&mut self, task: Arc<Mutex<dyn EventTask<E>>>) -> TaskId {
+    pub fn register_event_task(&mut self, task: Arc<Mutex<dyn EventTask<E, M>>>) -> TaskId {
         let id = self.task_registry.register_event_task(task);
         self.event_task_ids.push(id.clone());
         id
@@ -216,7 +216,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl EventTask<TestEvent> for MockEventTask {
+    impl EventTask<TestEvent, String> for MockEventTask {
         fn subscribed_event(&self) -> &TestEvent {
             &self.event
         }
@@ -227,7 +227,7 @@ mod tests {
         }
     }
 
-    fn create_test_event_bus() -> EventBus<TestEvent> {
+    fn create_test_event_bus() -> EventBus<TestEvent, String> {
         let configs = vec![
             (
                 TestEvent::TestEvent1,
@@ -244,7 +244,7 @@ mod tests {
     #[tokio::test]
     async fn test_scheduler_new() {
         let event_bus = create_test_event_bus();
-        let scheduler = Scheduler::<TestEvent>::new(event_bus);
+        let scheduler = Scheduler::<TestEvent, String>::new(event_bus);
 
         assert_eq!(scheduler.background_task_ids.len(), 0);
         assert_eq!(scheduler.event_task_ids.len(), 0);
@@ -254,7 +254,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_background_task() {
         let event_bus = create_test_event_bus();
-        let mut scheduler = Scheduler::<TestEvent>::new(event_bus);
+        let mut scheduler = Scheduler::<TestEvent, String>::new(event_bus);
 
         let task = Arc::new(Mutex::new(MockBackgroundTask::new("Background Task 1")));
         let id = scheduler.register_background_task(task.clone());
@@ -270,7 +270,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_event_task() {
         let event_bus = create_test_event_bus();
-        let mut scheduler = Scheduler::<TestEvent>::new(event_bus);
+        let mut scheduler = Scheduler::<TestEvent, String>::new(event_bus);
 
         let task = Arc::new(Mutex::new(MockEventTask::new(
             "Event Task 1",
@@ -289,7 +289,7 @@ mod tests {
     #[tokio::test]
     async fn test_start_and_shutdown() {
         let event_bus = create_test_event_bus();
-        let mut scheduler = Scheduler::<TestEvent>::new(event_bus);
+        let mut scheduler = Scheduler::<TestEvent, String>::new(event_bus);
 
         // Register background task
         let bg_task = Arc::new(Mutex::new(MockBackgroundTask::new("Background Task 1")));

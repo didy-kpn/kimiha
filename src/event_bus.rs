@@ -5,12 +5,12 @@ use tokio::sync::broadcast;
 use crate::{channel_config::ChannelConfig, error::OrchestratorError, types::EventType};
 
 #[derive(Clone)]
-pub struct EventBus<E> {
-    channels: HashMap<E, broadcast::Sender<String>>,
+pub struct EventBus<E, M> {
+    channels: HashMap<E, broadcast::Sender<M>>,
     configs: Vec<(E, ChannelConfig)>,
 }
 
-impl<E: EventType + 'static + ToString> EventBus<E> {
+impl<E: EventType + 'static + ToString, M: Clone + Send + 'static> EventBus<E, M> {
     pub fn new(configs: Vec<(E, ChannelConfig)>) -> Self {
         Self {
             channels: configs
@@ -34,7 +34,7 @@ impl<E: EventType + 'static + ToString> EventBus<E> {
     pub fn subscribe(
         &self,
         channel_event: &E,
-    ) -> Result<broadcast::Receiver<String>, OrchestratorError> {
+    ) -> Result<broadcast::Receiver<M>, OrchestratorError> {
         self.channels
             .get(channel_event)
             .ok_or(OrchestratorError::InvalidChannel(channel_event.to_string()))
@@ -44,7 +44,7 @@ impl<E: EventType + 'static + ToString> EventBus<E> {
     pub fn clone_sender(
         &self,
         channel_event: &E,
-    ) -> Result<broadcast::Sender<String>, OrchestratorError> {
+    ) -> Result<broadcast::Sender<M>, OrchestratorError> {
         self.channels
             .get(channel_event)
             .ok_or(OrchestratorError::InvalidChannel(channel_event.to_string()))
