@@ -8,145 +8,72 @@ use crate::{
     event_bus::EventBus,
     scheduler::Scheduler,
     task_id::TaskId,
-    types::{Aggregator as AggregatorTrait, BackgroundTask, Connector, EventTask, EventType, Executor, Strategy},
+    types::{BackgroundTask, Connector, EventTask, EventType, Executor, Strategy},
 };
 
-pub struct TradingOrchestratorBuilder<E, M> {
-    connectors: Vec<TaskId>,
-    strategies: Vec<TaskId>,
-    executors: Vec<TaskId>,
-    event_bus: EventBus<E, M>,
-    market_event: Option<E>,
-    scheduler: Option<Scheduler<E, M>>,
+pub struct TradingOrchestrator<E, M> {
+    connector_ids: Vec<TaskId>,
+    #[allow(dead_code)]
+    aggregator_id: TaskId,
+    strategy_ids: Vec<TaskId>,
+    executor_ids: Vec<TaskId>,
+    scheduler: Scheduler<E, M>,
 }
 
-impl<E: EventType + 'static + ToString + Clone, M: Clone + Send + 'static + From<String>> TradingOrchestratorBuilder<E, M> {
-    pub fn new(event_bus: EventBus<E, M>) -> Self {
+impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>>
+    TradingOrchestrator<E, M>
+{
+    pub fn new(event_bus: EventBus<E, M>, market_event: E) -> Self {
+        let mut scheduler = Scheduler::new(event_bus.clone());
+
+        let aggregator_name = "InternalAggregator".to_string();
+        let aggregator = Aggregator::new(aggregator_name, event_bus.clone(), market_event.clone());
+        let aggregator_arc: Arc<Mutex<dyn BackgroundTask>> = Arc::new(Mutex::new(aggregator));
+        let aggregator_id = scheduler.register_background_task(aggregator_arc);
+
         Self {
-            connectors: Vec::new(),
-            strategies: Vec::new(),
-            executors: Vec::new(),
-            event_bus,
-            market_event: None,
-            scheduler: None,
+            connector_ids: Vec::new(),
+            aggregator_id,
+            strategy_ids: Vec::new(),
+            executor_ids: Vec::new(),
+            scheduler,
         }
     }
 
-    pub fn with_connector<T: Connector + 'static>(mut self, connector: Arc<Mutex<T>>) -> Self {
-        // Create the scheduler if it doesn't exist yet
-        if self.scheduler.is_none() {
-            self.scheduler = Some(Scheduler::new(self.event_bus.clone()));
-        }
-
-        let scheduler = self.scheduler.as_mut().unwrap();
-        let background_task: Arc<Mutex<dyn BackgroundTask>> = connector;
-        let id = scheduler.register_background_task(background_task);
-        self.connectors.push(id);
-        self
+    pub fn add_connector<T: Connector + 'static>(&mut self, connector: Arc<Mutex<T>>) {
+        let task: Arc<Mutex<dyn BackgroundTask>> = connector;
+        let id = self.scheduler.register_background_task(task);
+        self.connector_ids.push(id);
     }
 
-    pub fn with_strategy<T: Strategy<E, M> + 'static>(mut self, strategy: Arc<Mutex<T>>) -> Self {
-        // Create the scheduler if it doesn't exist yet
-        if self.scheduler.is_none() {
-            self.scheduler = Some(Scheduler::new(self.event_bus.clone()));
-        }
-
-        let scheduler = self.scheduler.as_mut().unwrap();
-        let event_task: Arc<Mutex<dyn EventTask<E, M>>> = strategy;
-        let id = scheduler.register_event_task(event_task);
-        self.strategies.push(id);
-        self
+    pub fn add_strategy<T: Strategy<E, M> + 'static>(&mut self, strategy: Arc<Mutex<T>>) {
+        let task: Arc<Mutex<dyn EventTask<E, M>>> = strategy;
+        let id = self.scheduler.register_event_task(task);
+        self.strategy_ids.push(id);
     }
 
-    pub fn with_executor<T: Executor<E, M> + 'static>(mut self, executor: Arc<Mutex<T>>) -> Self {
-        // Create the scheduler if it doesn't exist yet
-        if self.scheduler.is_none() {
-            self.scheduler = Some(Scheduler::new(self.event_bus.clone()));
-        }
-
-        let scheduler = self.scheduler.as_mut().unwrap();
-        let event_task: Arc<Mutex<dyn EventTask<E, M>>> = executor;
-        let id = scheduler.register_event_task(event_task);
-        self.executors.push(id);
-        self
+    pub fn add_executor<T: Executor<E, M> + 'static>(&mut self, executor: Arc<Mutex<T>>) {
+        let task: Arc<Mutex<dyn EventTask<E, M>>> = executor;
+        let id = self.scheduler.register_event_task(task);
+        self.executor_ids.push(id);
     }
 
-    pub fn with_market_event(mut self, market_event: E) -> Self {
-        self.market_event = Some(market_event);
-        self
-    }
-
-    pub fn build(mut self) -> Result<TradingOrchestrator<E, M>, OrchestratorError> {
-        if self.connectors.is_empty() {
+    pub async fn start(&mut self) -> Result<(), OrchestratorError> {
+        if self.connector_ids.is_empty() {
             return Err(OrchestratorError::MissingComponent(
                 "at least one connector is required",
             ));
         }
-        if self.strategies.is_empty() {
+        if self.strategy_ids.is_empty() {
             return Err(OrchestratorError::MissingComponent(
                 "at least one strategy is required",
             ));
         }
-        if self.executors.is_empty() {
+        if self.executor_ids.is_empty() {
             return Err(OrchestratorError::MissingComponent(
                 "at least one executor is required",
             ));
         }
-        if self.market_event.is_none() {
-            return Err(OrchestratorError::MissingComponent(
-                "market event type is required",
-            ));
-        }
-        if self.scheduler.is_none() {
-            self.scheduler = Some(Scheduler::new(self.event_bus.clone()));
-        }
-
-        // Create the internal aggregator
-        let aggregator_name = "InternalAggregator".to_string();
-        let market_event = self.market_event.unwrap();
-        let aggregator = Aggregator::new(
-            aggregator_name,
-            self.event_bus.clone(),
-            market_event.clone(),
-        );
-        
-        // Get the input stream from the aggregator that connectors can use
-        let _aggregator_input = aggregator.market_data_sender();
-        // Note: In a real implementation, you would pass this to connectors
-        // or store it somewhere accessible to them
-
-        // Register the aggregator with the scheduler
-        let aggregator_arc: Arc<Mutex<dyn BackgroundTask>> = Arc::new(Mutex::new(aggregator));
-        let aggregator_id = self
-            .scheduler
-            .as_mut()
-            .unwrap()
-            .register_background_task(aggregator_arc);
-
-        Ok(TradingOrchestrator {
-            connectors: self.connectors,
-            aggregator_id,
-            strategies: self.strategies,
-            executors: self.executors,
-            scheduler: self.scheduler.unwrap(),
-        })
-    }
-}
-
-pub struct TradingOrchestrator<E, M> {
-    #[allow(dead_code)]
-    connectors: Vec<TaskId>,
-    #[allow(dead_code)]
-    aggregator_id: TaskId,
-    #[allow(dead_code)]
-    strategies: Vec<TaskId>,
-    #[allow(dead_code)]
-    executors: Vec<TaskId>,
-    scheduler: Scheduler<E, M>,
-}
-
-impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> TradingOrchestrator<E, M> {
-    pub async fn start(&mut self) -> Result<(), OrchestratorError> {
         self.scheduler.start().await?;
         Ok(())
     }
@@ -285,8 +212,6 @@ mod tests {
         }
 
         async fn handle_event(&mut self, event: String) -> Result<(), OrchestratorError> {
-            // In real testing, we should parse the event and check if it's a valid market snapshot
-            // But for this test, we'll just save it
             self.handled_event = Some(event);
             Ok(())
         }
@@ -367,7 +292,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_trading_orchestrator_builder() {
+    async fn test_trading_orchestrator() {
         let event_bus = create_test_event_bus();
 
         // Create the components
@@ -376,18 +301,15 @@ mod tests {
         let executor = Arc::new(Mutex::new(MockExecutor::new("Executor 1")));
 
         // Build the orchestrator
-        let orchestrator = TradingOrchestratorBuilder::new(event_bus)
-            .with_connector(connector.clone())
-            .with_strategy(strategy.clone())
-            .with_executor(executor.clone())
-            .with_market_event(TestEvent::MarketData)
-            .build()
-            .expect("Failed to build orchestrator");
+        let mut orchestrator = TradingOrchestrator::new(event_bus, TestEvent::MarketData);
+        orchestrator.add_connector(connector.clone());
+        orchestrator.add_strategy(strategy.clone());
+        orchestrator.add_executor(executor.clone());
 
         // Verify the orchestrator was built correctly
-        assert_eq!(orchestrator.connectors.len(), 1);
-        assert_eq!(orchestrator.strategies.len(), 1);
-        assert_eq!(orchestrator.executors.len(), 1);
+        assert_eq!(orchestrator.connector_ids.len(), 1);
+        assert_eq!(orchestrator.strategy_ids.len(), 1);
+        assert_eq!(orchestrator.executor_ids.len(), 1);
         assert_eq!(orchestrator.event_bus().channel_count(), 3);
     }
 
@@ -396,12 +318,11 @@ mod tests {
         let event_bus = create_test_event_bus();
 
         // Test missing connector
-        let result = TradingOrchestratorBuilder::new(event_bus.clone())
-            .with_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))))
-            .with_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))))
-            .with_market_event(TestEvent::MarketData)
-            .build();
+        let mut orchestrator = TradingOrchestrator::new(event_bus.clone(), TestEvent::MarketData);
+        orchestrator.add_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))));
+        orchestrator.add_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))));
 
+        let result = orchestrator.start().await;
         assert!(result.is_err());
         if let Err(OrchestratorError::MissingComponent(component)) = result {
             assert!(component.contains("connector"));
@@ -410,12 +331,11 @@ mod tests {
         }
 
         // Test missing strategy
-        let result = TradingOrchestratorBuilder::new(event_bus.clone())
-            .with_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))))
-            .with_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))))
-            .with_market_event(TestEvent::MarketData)
-            .build();
+        let mut orchestrator = TradingOrchestrator::new(event_bus.clone(), TestEvent::MarketData);
+        orchestrator.add_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))));
+        orchestrator.add_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))));
 
+        let result = orchestrator.start().await;
         assert!(result.is_err());
         if let Err(OrchestratorError::MissingComponent(component)) = result {
             assert!(component.contains("strategy"));
@@ -424,31 +344,16 @@ mod tests {
         }
 
         // Test missing executor
-        let result = TradingOrchestratorBuilder::new(event_bus.clone())
-            .with_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))))
-            .with_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))))
-            .with_market_event(TestEvent::MarketData)
-            .build();
+        let mut orchestrator = TradingOrchestrator::new(event_bus.clone(), TestEvent::MarketData);
+        orchestrator.add_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))));
+        orchestrator.add_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))));
 
+        let result = orchestrator.start().await;
         assert!(result.is_err());
         if let Err(OrchestratorError::MissingComponent(component)) = result {
             assert!(component.contains("executor"));
         } else {
             panic!("Expected MissingComponent error for executor");
-        }
-
-        // Test missing market event
-        let result = TradingOrchestratorBuilder::new(event_bus.clone())
-            .with_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))))
-            .with_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))))
-            .with_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))))
-            .build();
-
-        assert!(result.is_err());
-        if let Err(OrchestratorError::MissingComponent(component)) = result {
-            assert!(component.contains("market event"));
-        } else {
-            panic!("Expected MissingComponent error for market event");
         }
     }
 
@@ -462,13 +367,10 @@ mod tests {
         let executor = Arc::new(Mutex::new(MockExecutor::new("Executor 1")));
 
         // Build the orchestrator
-        let mut orchestrator = TradingOrchestratorBuilder::new(event_bus)
-            .with_connector(connector.clone())
-            .with_strategy(strategy.clone())
-            .with_executor(executor.clone())
-            .with_market_event(TestEvent::MarketData)
-            .build()
-            .expect("Failed to build orchestrator");
+        let mut orchestrator = TradingOrchestrator::new(event_bus, TestEvent::MarketData);
+        orchestrator.add_connector(connector.clone());
+        orchestrator.add_strategy(strategy.clone());
+        orchestrator.add_executor(executor.clone());
 
         // Start the orchestrator
         orchestrator
@@ -514,12 +416,9 @@ mod tests {
         // Verify background tasks were executed
         assert!(connector.lock().await.executed);
 
-        // Verify events were handled - check that the event string contains expected data
-        // For the market data strategy, it might receive either our manually sent event or a market snapshot
+        // Verify events were handled
         let strategy_lock = strategy.lock().await;
         assert!(strategy_lock.handled_event.is_some());
-
-        // Instead of exact matching, we just check if the event is either our manual one or a valid JSON
         if let Some(event_data) = &strategy_lock.handled_event {
             let is_manual_event = event_data == "market_data_event";
             let is_json_snapshot = event_data.starts_with("{") && event_data.ends_with("}");
@@ -530,7 +429,6 @@ mod tests {
             );
         }
 
-        // For the executor, it should have received our trade signal
         let executor_lock = executor.lock().await;
         assert!(executor_lock.handled_event.is_some());
         if let Some(event_data) = &executor_lock.handled_event {

@@ -98,7 +98,9 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
 }
 
 #[async_trait]
-impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> Executable for Aggregator<E, M> {
+impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> Executable
+    for Aggregator<E, M>
+{
     fn name(&self) -> &str {
         &self.name
     }
@@ -126,7 +128,9 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
 }
 
 #[async_trait]
-impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> BackgroundTask for Aggregator<E, M> {
+impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> BackgroundTask
+    for Aggregator<E, M>
+{
     async fn execute(&mut self) -> Result<(), OrchestratorError> {
         if !self.running {
             return Ok(());
@@ -155,7 +159,9 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
 }
 
 #[async_trait]
-impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> AggregatorTrait for Aggregator<E, M> {
+impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> AggregatorTrait
+    for Aggregator<E, M>
+{
     fn market_data_sender(&self) -> mpsc::Sender<MarketData> {
         self.connector_tx.clone()
     }
