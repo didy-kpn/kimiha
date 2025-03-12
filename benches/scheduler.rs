@@ -122,12 +122,12 @@ impl Executable for BenchEventTask {
 }
 
 #[async_trait]
-impl EventTask<BenchEvent> for BenchEventTask {
+impl EventTask<BenchEvent, ()> for BenchEventTask {
     fn subscribed_event(&self) -> &BenchEvent {
         &self.event
     }
 
-    async fn handle_event(&mut self, _event: String) -> Result<(), OrchestratorError> {
+    async fn handle_event(&mut self, _event: ()) -> Result<(), OrchestratorError> {
         // Simulate event handling work
         for _ in 0..self.work_amount {
             black_box(());
@@ -137,7 +137,7 @@ impl EventTask<BenchEvent> for BenchEventTask {
 }
 
 // Create event bus for benchmarking
-fn create_bench_event_bus() -> EventBus<BenchEvent> {
+fn create_bench_event_bus() -> EventBus<BenchEvent, ()> {
     let configs = vec![
         (
             BenchEvent::Event1,
@@ -161,7 +161,7 @@ fn bench_scheduler_creation(c: &mut Criterion) {
     group.bench_function("new", |b| {
         b.iter(|| {
             let event_bus = create_bench_event_bus();
-            black_box(Scheduler::<BenchEvent>::new(event_bus));
+            black_box(Scheduler::<BenchEvent, ()>::new(event_bus));
         });
     });
 
@@ -176,7 +176,7 @@ fn bench_task_registration(c: &mut Criterion) {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
                 let event_bus = create_bench_event_bus();
-                let mut scheduler = Scheduler::<BenchEvent>::new(event_bus);
+                let mut scheduler = Scheduler::<BenchEvent, ()>::new(event_bus);
                 let task = Arc::new(Mutex::new(BenchBackgroundTask::new(
                     "Bench Background Task",
                     10,
@@ -191,7 +191,7 @@ fn bench_task_registration(c: &mut Criterion) {
             let rt = Runtime::new().unwrap();
             rt.block_on(async {
                 let event_bus = create_bench_event_bus();
-                let mut scheduler = Scheduler::<BenchEvent>::new(event_bus);
+                let mut scheduler = Scheduler::<BenchEvent, ()>::new(event_bus);
                 let task = Arc::new(Mutex::new(BenchEventTask::new(
                     "Bench Event Task",
                     BenchEvent::Event1,
@@ -217,7 +217,7 @@ fn bench_task_scaling(c: &mut Criterion) {
                     let rt = Runtime::new().unwrap();
                     rt.block_on(async {
                         let event_bus = create_bench_event_bus();
-                        let mut scheduler = Scheduler::<BenchEvent>::new(event_bus);
+                        let mut scheduler = Scheduler::<BenchEvent, ()>::new(event_bus);
 
                         for i in 0..count {
                             let task = Arc::new(Mutex::new(BenchBackgroundTask::new(
@@ -241,7 +241,7 @@ fn bench_task_scaling(c: &mut Criterion) {
                     let rt = Runtime::new().unwrap();
                     rt.block_on(async {
                         let event_bus = create_bench_event_bus();
-                        let mut scheduler = Scheduler::<BenchEvent>::new(event_bus);
+                        let mut scheduler = Scheduler::<BenchEvent, ()>::new(event_bus);
 
                         for i in 0..count {
                             let event = match i % 3 {
@@ -279,7 +279,7 @@ fn bench_start_shutdown(c: &mut Criterion) {
                     let rt = Runtime::new().unwrap();
                     rt.block_on(async {
                         let event_bus = create_bench_event_bus();
-                        let mut scheduler = Scheduler::<BenchEvent>::new(event_bus);
+                        let mut scheduler = Scheduler::<BenchEvent, ()>::new(event_bus);
 
                         // Register background tasks
                         for i in 0..count {
@@ -323,7 +323,7 @@ fn bench_start_shutdown(c: &mut Criterion) {
                     let rt = Runtime::new().unwrap();
                     rt.block_on(async {
                         let event_bus = create_bench_event_bus();
-                        let mut scheduler = Scheduler::<BenchEvent>::new(event_bus);
+                        let mut scheduler = Scheduler::<BenchEvent, ()>::new(event_bus);
 
                         // Register background tasks
                         for i in 0..count {
@@ -375,7 +375,7 @@ fn bench_event_propagation(c: &mut Criterion) {
                     let rt = Runtime::new().unwrap();
                     rt.block_on(async {
                         let event_bus = create_bench_event_bus();
-                        let mut scheduler = Scheduler::<BenchEvent>::new(event_bus);
+                        let mut scheduler = Scheduler::<BenchEvent, ()>::new(event_bus);
 
                         // Register event tasks, all subscribing to the same event
                         for i in 0..count {
@@ -397,7 +397,7 @@ fn bench_event_propagation(c: &mut Criterion) {
                             .unwrap();
 
                         // Benchmark sending the event (this will propagate to all subscribers)
-                        black_box(sender.send("bench_event_data".to_string())).unwrap();
+                        black_box(sender.send(())).unwrap();
 
                         // Allow a little time for events to be processed
                         tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
