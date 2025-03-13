@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     aggregator::Aggregator,
+    channel_config::ChannelConfig,
     error::OrchestratorError,
     event_bus::EventBus,
     scheduler::Scheduler,
@@ -11,23 +12,58 @@ use crate::{
     types::{BackgroundTask, Connector, EventTask, EventType, Executor, Strategy},
 };
 
-pub struct TradingOrchestrator<E, M> {
-    connector_ids: Vec<TaskId>,
-    #[allow(dead_code)]
-    aggregator_id: TaskId,
-    strategy_ids: Vec<TaskId>,
-    executor_ids: Vec<TaskId>,
-    scheduler: Scheduler<E, M>,
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum TradingEventType {
+    MetricsUpdated,
+    SignalGenerated,
 }
 
-impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>>
-    TradingOrchestrator<E, M>
-{
-    pub fn new(event_bus: EventBus<E, M>, market_event: E) -> Self {
-        let mut scheduler = Scheduler::new(event_bus.clone());
+impl EventType for TradingEventType {}
 
-        let aggregator_name = "InternalAggregator".to_string();
-        let aggregator = Aggregator::new(aggregator_name, event_bus.clone(), market_event.clone());
+impl std::fmt::Display for TradingEventType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TradingEventType::MetricsUpdated => write!(f, "METRICS_UPDATED"),
+            TradingEventType::SignalGenerated => write!(f, "SIGNAL_GENERATED"),
+        }
+    }
+}
+
+pub struct TradingOrchestrator<M> {
+    pub(crate) connector_ids: Vec<TaskId>,
+    #[allow(dead_code)]
+    pub(crate) aggregator_id: TaskId,
+    pub(crate) strategy_ids: Vec<TaskId>,
+    pub(crate) executor_ids: Vec<TaskId>,
+    scheduler: Scheduler<TradingEventType, M>,
+}
+
+impl<M: Clone + Send + 'static + From<String>> Default for TradingOrchestrator<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<M: Clone + Send + 'static + From<String>> TradingOrchestrator<M> {
+    pub fn new() -> Self {
+        let configs = vec![
+            (
+                TradingEventType::MetricsUpdated,
+                ChannelConfig::new(10, "Metrics Updated Channel".to_string()),
+            ),
+            (
+                TradingEventType::SignalGenerated,
+                ChannelConfig::new(10, "Signal Generated Channel".to_string()),
+            ),
+        ];
+
+        let event_bus = EventBus::new(configs);
+        let mut scheduler = Scheduler::new(event_bus.clone());
+        let aggregator = Aggregator::new(
+            "InternalAggregator".to_string(),
+            event_bus.clone(),
+            TradingEventType::MetricsUpdated,
+        );
         let aggregator_arc: Arc<Mutex<dyn BackgroundTask>> = Arc::new(Mutex::new(aggregator));
         let aggregator_id = scheduler.register_background_task(aggregator_arc);
 
@@ -46,14 +82,20 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
         self.connector_ids.push(id);
     }
 
-    pub fn add_strategy<T: Strategy<E, M> + 'static>(&mut self, strategy: Arc<Mutex<T>>) {
-        let task: Arc<Mutex<dyn EventTask<E, M>>> = strategy;
+    pub fn add_strategy<T: Strategy<TradingEventType, M> + 'static>(
+        &mut self,
+        strategy: Arc<Mutex<T>>,
+    ) {
+        let task: Arc<Mutex<dyn EventTask<TradingEventType, M>>> = strategy;
         let id = self.scheduler.register_event_task(task);
         self.strategy_ids.push(id);
     }
 
-    pub fn add_executor<T: Executor<E, M> + 'static>(&mut self, executor: Arc<Mutex<T>>) {
-        let task: Arc<Mutex<dyn EventTask<E, M>>> = executor;
+    pub fn add_executor<T: Executor<TradingEventType, M> + 'static>(
+        &mut self,
+        executor: Arc<Mutex<T>>,
+    ) {
+        let task: Arc<Mutex<dyn EventTask<TradingEventType, M>>> = executor;
         let id = self.scheduler.register_event_task(task);
         self.executor_ids.push(id);
     }
@@ -83,7 +125,7 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
         Ok(())
     }
 
-    pub fn event_bus(&self) -> &EventBus<E, M> {
+    pub fn event_bus(&self) -> &EventBus<TradingEventType, M> {
         self.scheduler.event_bus()
     }
 }
@@ -92,33 +134,12 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
 mod tests {
     use super::*;
     use crate::{
-        channel_config::ChannelConfig,
         error::OrchestratorError,
-        event_bus::EventBus,
-        types::{BackgroundTask, Connector, EventTask, EventType, Executable, Executor, Strategy},
+        types::{BackgroundTask, Connector, EventTask, Executable, Executor, Strategy},
     };
     use async_trait::async_trait;
     use std::sync::Arc;
     use tokio::sync::Mutex;
-
-    #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-    enum TestEvent {
-        MarketData,
-        TradeSignal,
-        Execution,
-    }
-
-    impl EventType for TestEvent {}
-
-    impl std::fmt::Display for TestEvent {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                TestEvent::MarketData => write!(f, "MarketData"),
-                TestEvent::TradeSignal => write!(f, "TradeSignal"),
-                TestEvent::Execution => write!(f, "Execution"),
-            }
-        }
-    }
 
     // Mock connector implementation
     struct MockConnector {
@@ -170,7 +191,7 @@ mod tests {
     // Mock strategy implementation
     struct MockStrategy {
         name: String,
-        event: TestEvent,
+        event: TradingEventType,
         initialized: bool,
         handled_event: Option<String>,
         shutdown: bool,
@@ -180,7 +201,7 @@ mod tests {
         fn new(name: &str) -> Self {
             Self {
                 name: name.to_string(),
-                event: TestEvent::MarketData,
+                event: TradingEventType::MetricsUpdated,
                 initialized: false,
                 handled_event: None,
                 shutdown: false,
@@ -206,8 +227,8 @@ mod tests {
     }
 
     #[async_trait]
-    impl EventTask<TestEvent, String> for MockStrategy {
-        fn subscribed_event(&self) -> &TestEvent {
+    impl EventTask<TradingEventType, String> for MockStrategy {
+        fn subscribed_event(&self) -> &TradingEventType {
             &self.event
         }
 
@@ -218,12 +239,12 @@ mod tests {
     }
 
     #[async_trait]
-    impl Strategy<TestEvent, String> for MockStrategy {}
+    impl Strategy<TradingEventType, String> for MockStrategy {}
 
     // Mock executor implementation
     struct MockExecutor {
         name: String,
-        event: TestEvent,
+        event: TradingEventType,
         initialized: bool,
         handled_event: Option<String>,
         shutdown: bool,
@@ -233,7 +254,7 @@ mod tests {
         fn new(name: &str) -> Self {
             Self {
                 name: name.to_string(),
-                event: TestEvent::TradeSignal,
+                event: TradingEventType::SignalGenerated,
                 initialized: false,
                 handled_event: None,
                 shutdown: false,
@@ -259,8 +280,8 @@ mod tests {
     }
 
     #[async_trait]
-    impl EventTask<TestEvent, String> for MockExecutor {
-        fn subscribed_event(&self) -> &TestEvent {
+    impl EventTask<TradingEventType, String> for MockExecutor {
+        fn subscribed_event(&self) -> &TradingEventType {
             &self.event
         }
 
@@ -271,37 +292,17 @@ mod tests {
     }
 
     #[async_trait]
-    impl Executor<TestEvent, String> for MockExecutor {}
-
-    fn create_test_event_bus() -> EventBus<TestEvent, String> {
-        let configs = vec![
-            (
-                TestEvent::MarketData,
-                ChannelConfig::new(10, "Market Data Channel".to_string()),
-            ),
-            (
-                TestEvent::TradeSignal,
-                ChannelConfig::new(10, "Trade Signal Channel".to_string()),
-            ),
-            (
-                TestEvent::Execution,
-                ChannelConfig::new(10, "Execution Channel".to_string()),
-            ),
-        ];
-        EventBus::new(configs)
-    }
+    impl Executor<TradingEventType, String> for MockExecutor {}
 
     #[tokio::test]
     async fn test_trading_orchestrator() {
-        let event_bus = create_test_event_bus();
-
         // Create the components
         let connector = Arc::new(Mutex::new(MockConnector::new("Connector 1")));
         let strategy = Arc::new(Mutex::new(MockStrategy::new("Strategy 1")));
         let executor = Arc::new(Mutex::new(MockExecutor::new("Executor 1")));
 
-        // Build the orchestrator
-        let mut orchestrator = TradingOrchestrator::new(event_bus, TestEvent::MarketData);
+        // Build the orchestrator using the internally created EventBus
+        let mut orchestrator = TradingOrchestrator::<String>::new();
         orchestrator.add_connector(connector.clone());
         orchestrator.add_strategy(strategy.clone());
         orchestrator.add_executor(executor.clone());
@@ -310,15 +311,14 @@ mod tests {
         assert_eq!(orchestrator.connector_ids.len(), 1);
         assert_eq!(orchestrator.strategy_ids.len(), 1);
         assert_eq!(orchestrator.executor_ids.len(), 1);
-        assert_eq!(orchestrator.event_bus().channel_count(), 3);
+        // Now, the EventBus should have 2 channels: METRICS_UPDATED and SIGNAL_GENERATED
+        assert_eq!(orchestrator.event_bus().channel_count(), 2);
     }
 
     #[tokio::test]
     async fn test_orchestrator_missing_components() {
-        let event_bus = create_test_event_bus();
-
         // Test missing connector
-        let mut orchestrator = TradingOrchestrator::new(event_bus.clone(), TestEvent::MarketData);
+        let mut orchestrator = TradingOrchestrator::<String>::new();
         orchestrator.add_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))));
         orchestrator.add_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))));
 
@@ -331,7 +331,7 @@ mod tests {
         }
 
         // Test missing strategy
-        let mut orchestrator = TradingOrchestrator::new(event_bus.clone(), TestEvent::MarketData);
+        let mut orchestrator = TradingOrchestrator::<String>::new();
         orchestrator.add_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))));
         orchestrator.add_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))));
 
@@ -344,7 +344,7 @@ mod tests {
         }
 
         // Test missing executor
-        let mut orchestrator = TradingOrchestrator::new(event_bus.clone(), TestEvent::MarketData);
+        let mut orchestrator = TradingOrchestrator::<String>::new();
         orchestrator.add_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))));
         orchestrator.add_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))));
 
@@ -359,15 +359,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_orchestrator_start_shutdown() {
-        let event_bus = create_test_event_bus();
-
         // Create the components
         let connector = Arc::new(Mutex::new(MockConnector::new("Connector 1")));
         let strategy = Arc::new(Mutex::new(MockStrategy::new("Strategy 1")));
         let executor = Arc::new(Mutex::new(MockExecutor::new("Executor 1")));
 
         // Build the orchestrator
-        let mut orchestrator = TradingOrchestrator::new(event_bus, TestEvent::MarketData);
+        let mut orchestrator = TradingOrchestrator::<String>::new();
         orchestrator.add_connector(connector.clone());
         orchestrator.add_strategy(strategy.clone());
         orchestrator.add_executor(executor.clone());
@@ -381,23 +379,23 @@ mod tests {
         // Give some time for tasks to initialize
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        // Verify connector was initialized
+        // Verify components were initialized
         assert!(connector.lock().await.initialized);
         assert!(strategy.lock().await.initialized);
         assert!(executor.lock().await.initialized);
 
-        // Manually publish events instead of relying on aggregator's events
-        let market_data_sender = orchestrator
+        // Manually publish events
+        let metrics_sender = orchestrator
             .event_bus()
-            .clone_sender(&TestEvent::MarketData)
+            .clone_sender(&TradingEventType::MetricsUpdated)
             .unwrap();
-        let _ = market_data_sender.send("market_data_event".to_string());
+        let _ = metrics_sender.send("metrics_event".to_string());
 
-        let trade_signal_sender = orchestrator
+        let signal_sender = orchestrator
             .event_bus()
-            .clone_sender(&TestEvent::TradeSignal)
+            .clone_sender(&TradingEventType::SignalGenerated)
             .unwrap();
-        let _ = trade_signal_sender.send("trade_signal_event".to_string());
+        let _ = signal_sender.send("signal_event".to_string());
 
         // Give some time for events to be processed
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -420,7 +418,7 @@ mod tests {
         let strategy_lock = strategy.lock().await;
         assert!(strategy_lock.handled_event.is_some());
         if let Some(event_data) = &strategy_lock.handled_event {
-            let is_manual_event = event_data == "market_data_event";
+            let is_manual_event = event_data == "metrics_event";
             let is_json_snapshot = event_data.starts_with("{") && event_data.ends_with("}");
             assert!(
                 is_manual_event || is_json_snapshot,
@@ -432,7 +430,7 @@ mod tests {
         let executor_lock = executor.lock().await;
         assert!(executor_lock.handled_event.is_some());
         if let Some(event_data) = &executor_lock.handled_event {
-            assert_eq!(event_data, "trade_signal_event");
+            assert_eq!(event_data, "signal_event");
         }
     }
 }
