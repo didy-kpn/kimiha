@@ -82,22 +82,42 @@ impl<M: Clone + Send + 'static + From<String>> TradingOrchestrator<M> {
         self.connector_ids.push(id);
     }
 
-    pub fn add_strategy<T: Strategy<TradingEventType, M> + 'static>(
+    // async版に変更: strategyのsubscribed_eventがMetricsUpdatedであるか検証します
+    pub async fn add_strategy<T: Strategy<TradingEventType, M> + 'static>(
         &mut self,
         strategy: Arc<Mutex<T>>,
-    ) {
+    ) -> Result<(), OrchestratorError> {
+        {
+            let guard = strategy.lock().await;
+            if *guard.subscribed_event() != TradingEventType::MetricsUpdated {
+                return Err(OrchestratorError::InvalidSubscribedEvent(
+                    "Strategy subscribed event must be MetricsUpdated".to_string(),
+                ));
+            }
+        }
         let task: Arc<Mutex<dyn EventTask<TradingEventType, M>>> = strategy;
         let id = self.scheduler.register_event_task(task);
         self.strategy_ids.push(id);
+        Ok(())
     }
 
-    pub fn add_executor<T: Executor<TradingEventType, M> + 'static>(
+    // async版に変更: executorのsubscribed_eventがSignalGeneratedであるか検証します
+    pub async fn add_executor<T: Executor<TradingEventType, M> + 'static>(
         &mut self,
         executor: Arc<Mutex<T>>,
-    ) {
+    ) -> Result<(), OrchestratorError> {
+        {
+            let guard = executor.lock().await;
+            if *guard.subscribed_event() != TradingEventType::SignalGenerated {
+                return Err(OrchestratorError::InvalidSubscribedEvent(
+                    "Executor subscribed event must be SignalGenerated".to_string(),
+                ));
+            }
+        }
         let task: Arc<Mutex<dyn EventTask<TradingEventType, M>>> = executor;
         let id = self.scheduler.register_event_task(task);
         self.executor_ids.push(id);
+        Ok(())
     }
 
     pub async fn start(&mut self) -> Result<(), OrchestratorError> {
@@ -304,8 +324,8 @@ mod tests {
         // Build the orchestrator using the internally created EventBus
         let mut orchestrator = TradingOrchestrator::<String>::new();
         orchestrator.add_connector(connector.clone());
-        orchestrator.add_strategy(strategy.clone());
-        orchestrator.add_executor(executor.clone());
+        orchestrator.add_strategy(strategy.clone()).await.unwrap();
+        orchestrator.add_executor(executor.clone()).await.unwrap();
 
         // Verify the orchestrator was built correctly
         assert_eq!(orchestrator.connector_ids.len(), 1);
@@ -319,8 +339,8 @@ mod tests {
     async fn test_orchestrator_missing_components() {
         // Test missing connector
         let mut orchestrator = TradingOrchestrator::<String>::new();
-        orchestrator.add_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))));
-        orchestrator.add_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))));
+        orchestrator.add_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1")))).await.unwrap();
+        orchestrator.add_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1")))).await.unwrap();
 
         let result = orchestrator.start().await;
         assert!(result.is_err());
@@ -333,7 +353,7 @@ mod tests {
         // Test missing strategy
         let mut orchestrator = TradingOrchestrator::<String>::new();
         orchestrator.add_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))));
-        orchestrator.add_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1"))));
+        orchestrator.add_executor(Arc::new(Mutex::new(MockExecutor::new("Executor 1")))).await.unwrap();
 
         let result = orchestrator.start().await;
         assert!(result.is_err());
@@ -346,7 +366,7 @@ mod tests {
         // Test missing executor
         let mut orchestrator = TradingOrchestrator::<String>::new();
         orchestrator.add_connector(Arc::new(Mutex::new(MockConnector::new("Connector 1"))));
-        orchestrator.add_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1"))));
+        orchestrator.add_strategy(Arc::new(Mutex::new(MockStrategy::new("Strategy 1")))).await.unwrap();
 
         let result = orchestrator.start().await;
         assert!(result.is_err());
@@ -367,8 +387,8 @@ mod tests {
         // Build the orchestrator
         let mut orchestrator = TradingOrchestrator::<String>::new();
         orchestrator.add_connector(connector.clone());
-        orchestrator.add_strategy(strategy.clone());
-        orchestrator.add_executor(executor.clone());
+        orchestrator.add_strategy(strategy.clone()).await.unwrap();
+        orchestrator.add_executor(executor.clone()).await.unwrap();
 
         // Start the orchestrator
         orchestrator

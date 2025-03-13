@@ -10,6 +10,8 @@ pub enum OrchestratorError {
     TaskShutdown(String),
     #[error("Invalid channel: {0}")]
     InvalidChannel(String),
+    #[error("Invalid subscribed event: {0}")]
+    InvalidSubscribedEvent(String),
     #[error("Event send error: {0}")]
     EventSend(String),
     #[error("Event receive error: {0}")]
