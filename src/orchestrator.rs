@@ -116,6 +116,37 @@ impl<M: Clone + Send + 'static + From<String>> TradingOrchestrator<M> {
                 "at least one executor is required",
             ));
         }
+
+        for strategy_id in &self.strategy_ids {
+            let task = self
+                .scheduler
+                .task_registry()
+                .get_event_task(strategy_id)
+                .ok_or_else(|| OrchestratorError::TaskNotFound(strategy_id.clone()))?;
+            let guard = task.lock().await;
+            let event = guard.subscribed_event();
+            if *event != TradingEventType::MetricsUpdated {
+                return Err(OrchestratorError::InvalidTaskEventType(
+                    "All strategy tasks must subscribe to TradingEventType::MetricsUpdated",
+                ));
+            }
+        }
+
+        for executor_id in &self.executor_ids {
+            let task = self
+                .scheduler
+                .task_registry()
+                .get_event_task(executor_id)
+                .ok_or_else(|| OrchestratorError::TaskNotFound(executor_id.clone()))?;
+            let guard = task.lock().await;
+            let event = guard.subscribed_event();
+            if *event != TradingEventType::SignalGenerated {
+                return Err(OrchestratorError::InvalidTaskEventType(
+                    "All executor tasks must subscribe to TradingEventType::SignalGenerated",
+                ));
+            }
+        }
+
         self.scheduler.start().await?;
         Ok(())
     }

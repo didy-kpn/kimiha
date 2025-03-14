@@ -31,6 +31,10 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static> Scheduler<E, 
         &self.event_bus
     }
 
+    pub fn task_registry(&self) -> &TaskRegistry<E, M> {
+        &self.task_registry
+    }
+
     pub fn register_background_task(&mut self, task: Arc<Mutex<dyn BackgroundTask>>) -> TaskId {
         let id = self.task_registry.register_background_task(task);
         self.background_task_ids.push(id.clone());

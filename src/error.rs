@@ -20,6 +20,8 @@ pub enum OrchestratorError {
     MissingComponent(&'static str),
     #[error("Component not initialized: {0}")]
     NotInitialized(&'static str),
+    #[error("Invalid task's eventtype: {0}")]
+    InvalidTaskEventType(&'static str),
     #[error("Invalid configuration: {0}")]
     InvalidConfiguration(String),
     #[error("Serialization error: {0}")]
