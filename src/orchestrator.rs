@@ -57,13 +57,12 @@ impl<M: Clone + Send + 'static + From<String>> TradingOrchestrator<M> {
             ),
         ];
 
-        let event_bus = EventBus::new(configs);
+        let event_bus = EventBus::<TradingEventType, M>::new(configs);
         let mut scheduler = Scheduler::new(event_bus.clone());
-        let aggregator = Aggregator::new(
-            "InternalAggregator".to_string(),
-            event_bus.clone(),
-            TradingEventType::MetricsUpdated,
-        );
+        let market_sender = event_bus
+            .clone_sender(&TradingEventType::MetricsUpdated)
+            .expect("Failed to clone sender for MetricsUpdated");
+        let aggregator = Aggregator::<M>::new("InternalAggregator".to_string(), market_sender);
         let aggregator_arc: Arc<Mutex<dyn BackgroundTask>> = Arc::new(Mutex::new(aggregator));
         let aggregator_id = scheduler.register_background_task(aggregator_arc);
 

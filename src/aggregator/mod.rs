@@ -3,11 +3,10 @@ pub mod models;
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, broadcast, mpsc};
 
 use crate::error::OrchestratorError;
-use crate::event_bus::EventBus;
-use crate::types::{Aggregator as AggregatorTrait, BackgroundTask, EventType, Executable};
+use crate::types::{Aggregator as AggregatorTrait, BackgroundTask, Executable};
 
 use self::components::{
     opportunity_detector::OpportunityDetector, orderbook_manager::OrderBookManager,
@@ -15,7 +14,7 @@ use self::components::{
 };
 use self::models::MarketData;
 
-pub struct Aggregator<E: EventType + 'static + ToString, M: Clone + Send + 'static = String> {
+pub struct Aggregator<M: Clone + Send + 'static = String> {
     name: String,
     // Receiver for data from Connectors
     connector_rx: mpsc::Receiver<MarketData>,
@@ -27,18 +26,15 @@ pub struct Aggregator<E: EventType + 'static + ToString, M: Clone + Send + 'stat
     price_normalizer: Arc<Mutex<PriceNormalizer>>,
     opportunity_detector: Arc<Mutex<OpportunityDetector>>,
 
-    // Event bus for publishing events
-    event_bus: EventBus<E, M>,
-
-    // Market event type
-    market_event: E,
+    // Market event sender
+    market_sender: broadcast::Sender<M>,
 
     // Is the aggregator running
     running: bool,
 }
 
-impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> Aggregator<E, M> {
-    pub fn new(name: String, event_bus: EventBus<E, M>, market_event: E) -> Self {
+impl<M: Clone + Send + 'static + From<String>> Aggregator<M> {
+    pub fn new(name: String, market_sender: broadcast::Sender<M>) -> Self {
         let (tx, rx) = mpsc::channel(100); // Buffer size of 100, might need adjustment
 
         Self {
@@ -48,8 +44,7 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
             orderbook_manager: Arc::new(Mutex::new(OrderBookManager::new())),
             price_normalizer: Arc::new(Mutex::new(PriceNormalizer::new())),
             opportunity_detector: Arc::new(Mutex::new(OpportunityDetector::new())),
-            event_bus,
-            market_event,
+            market_sender,
             running: false,
         }
     }
@@ -73,14 +68,12 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
 
         // If opportunities were found, publish them as events
         if !opportunities.is_empty() {
-            let sender = self.event_bus.clone_sender(&self.market_event)?;
-
             for opportunity in opportunities {
                 let serialized = serde_json::to_string(&opportunity)
                     .map_err(|e| OrchestratorError::SerializationError(e.to_string()))?;
 
                 // Ignore errors here, as receivers might have dropped
-                let _ = sender.send(M::from(serialized));
+                let _ = self.market_sender.send(M::from(serialized));
             }
         }
 
@@ -98,9 +91,7 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
 }
 
 #[async_trait]
-impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> Executable
-    for Aggregator<E, M>
-{
+impl<M: Clone + Send + 'static + From<String>> Executable for Aggregator<M> {
     fn name(&self) -> &str {
         &self.name
     }
@@ -128,9 +119,7 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
 }
 
 #[async_trait]
-impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> BackgroundTask
-    for Aggregator<E, M>
-{
+impl<M: Clone + Send + 'static + From<String>> BackgroundTask for Aggregator<M> {
     async fn execute(&mut self) -> Result<(), OrchestratorError> {
         if !self.running {
             return Ok(());
@@ -149,8 +138,7 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
             if COUNTER % 100 == 0 {
                 let snapshot = self.create_snapshot().await?;
                 // Do something with the snapshot, e.g., publish it as an event
-                let sender = self.event_bus.clone_sender(&self.market_event)?;
-                let _ = sender.send(M::from(snapshot));
+                let _ = self.market_sender.send(M::from(snapshot));
             }
         }
 
@@ -159,9 +147,7 @@ impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>
 }
 
 #[async_trait]
-impl<E: EventType + 'static + ToString, M: Clone + Send + 'static + From<String>> AggregatorTrait
-    for Aggregator<E, M>
-{
+impl<M: Clone + Send + 'static + From<String>> AggregatorTrait for Aggregator<M> {
     fn market_data_sender(&self) -> mpsc::Sender<MarketData> {
         self.connector_tx.clone()
     }
